@@ -46,12 +46,12 @@ jobs:
         run: go build ./...
 
       - name: Test
-        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+        run: go test -race -coverprofile=coverage.txt -covermode=atomic ./...
 
       - name: Coverage summary
-        run: go tool cover -func=coverage.out | tail -1 >> $GITHUB_STEP_SUMMARY
+        run: go tool cover -func=coverage.txt | tail -1 >> $GITHUB_STEP_SUMMARY
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
         with:
-          name: coverage-report-${{ matrix.go-version }}
-          path: coverage.out
+          token: ${{ secrets.CODECOV_TOKEN }}
