@@ -1,4 +1,4 @@
-# github
+# Github Backend for Afero
 
 A Go `afero.Fs` backed by a GitHub repository. Read, write, delete, and rename files in a repo using standard Go file-IO semantics; under the hood it calls the GitHub Contents API and raw.githubusercontent.com for byte ranges.
 
