@@ -1,3 +1,19 @@
+// Package github exposes a GitHub repository as a filesystem implementing [spf13/afero.Fs].
+// Reads and writes to the virtual filesystem are translated into GitHub Contents API calls,
+// with an HTTP Range request fallback for efficient byte-range reads from raw.githubusercontent.com.
+//
+// The package provides a Client for GitHub API authentication (supporting personal access tokens,
+// GitHub Apps, or direct github.Client) and an Fs type that implements afero.Fs for file operations
+// on a repository. All paths are normalized to forward slashes and have leading slashes trimmed.
+//
+// The Fs type maintains three parallel caches for consistency:
+//   - memFs (afero MemMapFs): holds decoded file bytes to avoid repeated API calls
+//   - shaCache: path to blob SHA mapping, required by GitHub API for updates/deletes
+//   - ttlCache: path to last-fetch time, gated by configurable TTL (default 30s)
+//
+// Directory operations use GitHub's Contents API list response, creating .gitkeep placeholders
+// for directories since GitHub has no native directory support. File operations support read,
+// write, append, and seek semantics on top of GitHub's blob-replacement model.
 package github
 
 import (
@@ -9,18 +25,18 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// ClientOptions is a function type that defines the signature
-// for configuration options that can be applied to the Client struct.
+// ClientOptions is a function type that configures a Client using the functional options pattern.
 type ClientOptions func(*Client) error
 
-// Client is a wrapper around the github.Client that provides
-// additional functionality and configuration options.
+// Client is a wrapper around a GitHub API client that coordinates authentication
+// and context management for Fs operations.
 type Client struct {
 	ctx    context.Context
 	client *gh.Client
 }
 
-// NewClient creates a new Client instance with the provided context and options.
+// NewClient creates a new Client instance with the provided context and applies all provided options.
+// It returns a combined error from all failed options, or nil if all succeed.
 func NewClient(ctx context.Context, options ...ClientOptions) (*Client, error) {
 	var errs []error
 	client := &Client{ctx: ctx}
@@ -37,7 +53,8 @@ func NewClient(ctx context.Context, options ...ClientOptions) (*Client, error) {
 	return client, nil
 }
 
-// WithGithubClient is a ClientOption that sets the github.Client directly on the Client struct.
+// WithGithubClient sets the underlying github.Client directly, bypassing authentication setup.
+// This is useful when you already have a configured client from another source.
 func WithGithubClient(githubClient *gh.Client) ClientOptions {
 	return func(c *Client) error {
 		c.client = githubClient
@@ -45,8 +62,8 @@ func WithGithubClient(githubClient *gh.Client) ClientOptions {
 	}
 }
 
-// WithGithubToken is a ClientOption that configures the Client to use a personal
-// access token for authentication with GitHub.
+// WithGithubToken configures authentication using a GitHub personal access token (PAT).
+// The token is wrapped in an oauth2.Client and used to create a new github.Client.
 func WithGithubToken(token string) ClientOptions {
 	return func(c *Client) error {
 		tokenSource := githubauth.NewPersonalAccessTokenSource(token)
@@ -56,7 +73,9 @@ func WithGithubToken(token string) ClientOptions {
 	}
 }
 
-// WithGithubApplication is a ClientOption that configures the Client to use GitHub App authentication.
+// WithGithubApplication configures authentication using GitHub App credentials.
+// It requires the app's clientID, the installation ID, and the private key in PEM-encoded bytes.
+// The client will use installation tokens for API calls.
 func WithGithubApplication(clientID string, installationID int64, privateKey []byte) ClientOptions {
 	return func(c *Client) error {
 		appTokenSource, err := githubauth.NewApplicationTokenSource(clientID, privateKey)

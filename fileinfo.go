@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// GitHubFileInfo implements os.FileInfo.
+// GitHubFileInfo implements os.FileInfo for files and directories in a GitHub repository.
 type GitHubFileInfo struct {
 	name    string
 	size    int64
@@ -14,11 +14,22 @@ type GitHubFileInfo struct {
 	mode    os.FileMode
 }
 
-func (fi *GitHubFileInfo) Name() string       { return fi.name }
-func (fi *GitHubFileInfo) Size() int64        { return fi.size }
-func (fi *GitHubFileInfo) IsDir() bool        { return fi.isDir }
+// Name returns the base name of the file.
+func (fi *GitHubFileInfo) Name() string { return fi.name }
+
+// Size returns the file size in bytes.
+func (fi *GitHubFileInfo) Size() int64 { return fi.size }
+
+// IsDir reports whether the path is a directory.
+func (fi *GitHubFileInfo) IsDir() bool { return fi.isDir }
+
+// ModTime returns the modification time. This is currently a zero value as GitHub does not expose file modification times.
 func (fi *GitHubFileInfo) ModTime() time.Time { return fi.modTime }
-func (fi *GitHubFileInfo) Sys() any           { return nil }
+
+// Sys returns underlying system data. For GitHub files, this is always nil.
+func (fi *GitHubFileInfo) Sys() any { return nil }
+
+// Mode returns the file mode bits. For directories, it includes os.ModeDir.
 func (fi *GitHubFileInfo) Mode() os.FileMode {
 	if fi.isDir {
 		return fi.mode | os.ModeDir

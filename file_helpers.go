@@ -12,9 +12,10 @@ import (
 	"github.com/google/go-github/v84/github"
 )
 
-// flush writes the current buffer content to GitHub using the Contents API. It handles both creating new files and
-// updating existing ones based on the presence of a SHA in the cache. After a successful flush, it updates the SHA
-// cache and refreshes the in-memory file system layer to reflect the latest content. It returns any error encountered during the process.
+// flush writes the file's buffer content to GitHub using the Contents API.
+// It creates a new file if the SHA is not in the cache, or updates an existing file if the SHA is present.
+// After a successful flush, it updates the SHA cache with the response and refreshes the MemMapFs layer.
+// The dirty flag is cleared on success.
 func (f *File) flush() error {
 	sha := f.fs.getSHA(f.path)
 	data := f.buf.Bytes()
@@ -54,8 +55,8 @@ func (f *File) flush() error {
 	return nil
 }
 
-// getReader returns the underlying bytes.Reader, building it from the write
-// buffer when the file was opened for RDWR.
+// getReader returns the underlying bytes.Reader. If the reader is not yet initialized
+// (e.g., the file was opened for write-only), it creates one from the buffer content.
 func (f *File) getReader() *bytes.Reader {
 	if f.reader == nil {
 		f.reader = bytes.NewReader(f.buf.Bytes())
@@ -73,8 +74,8 @@ func (f *File) writable() bool {
 	return f.flag&os.O_WRONLY != 0 || f.flag&os.O_RDWR != 0 || f.flag&os.O_CREATE != 0
 }
 
-// currentSize returns the current size of the file content. If the file is dirty or has no reader,
-// it returns the size of the write buffer. Otherwise, it returns the size of the reader's content.
+// currentSize returns the current file size. If the file is dirty or has no reader,
+// it returns the buffer size. Otherwise, it returns the reader size.
 func (f *File) currentSize() int64 {
 	if f.dirty || f.reader == nil {
 		return int64(f.buf.Len())
@@ -82,8 +83,9 @@ func (f *File) currentSize() int64 {
 	return f.reader.Size()
 }
 
-// rawContentURL constructs the raw content URL for the file based on the GitHub repository information and file path.
-// It returns an error if any of the required configuration (owner, repo, branch, or path) is missing.
+// rawContentURL constructs the raw.githubusercontent.com URL for the file.
+// This URL is used for HTTP Range requests to efficiently fetch byte ranges.
+// Returns an error if the required GitHub configuration is incomplete.
 func (f *File) rawContentURL() (string, error) {
 	if f.fs.Owner() == "" || f.fs.Repo() == "" || f.fs.Branch() == "" || f.path == "" {
 		return "", errors.New("incomplete GitHubFs configuration")
@@ -94,8 +96,10 @@ func (f *File) rawContentURL() (string, error) {
 	), nil
 }
 
-// newFileForWrite prepares a write-mode file, pre-loading current content
-// if O_APPEND or O_RDWR so we hold the right base for the flush.
+// newFileForWrite creates a File prepared for writing. If O_APPEND or O_RDWR is set,
+// it pre-loads the existing file content so that the buffer reflects the correct base
+// for subsequent flush operations (GitHub always replaces the entire blob).
+// Returns an error if fetching existing content fails (unless ErrNotExist for new files).
 func newFileForWrite(fs *Fs, path string, flag int) (*File, error) {
 	f := &File{
 		fs:    fs,
@@ -123,7 +127,8 @@ func newFileForWrite(fs *Fs, path string, flag int) (*File, error) {
 	return f, nil
 }
 
-// newDir creates a new File instance representing a directory, with the provided entries.
+// newDir creates a File representing a directory with preloaded entries.
+// The dirEntries slice is used for subsequent Readdir calls.
 func newDir(fs *Fs, path string, entries []os.FileInfo) *File {
 	return &File{
 		fs:         fs,
@@ -135,15 +140,15 @@ func newDir(fs *Fs, path string, entries []os.FileInfo) *File {
 	}
 }
 
-// contextCloser cancels the request context when the body is closed.
+// contextCloser wraps an io.ReadCloser and cancels an associated context when closed.
+// This ensures that long-running HTTP operations are properly cleaned up.
 type contextCloser struct {
 	io.ReadCloser
 	cancel context.CancelFunc
 }
 
-// Close implements the io.Closer interface for contextCloser. It cancels the associated context
-// and then closes the underlying ReadCloser. This ensures that any ongoing operations using the
-// context are properly terminated when the reader is closed.
+// Close cancels the associated context and closes the underlying ReadCloser.
+// The context is cancelled first (via defer) to ensure cleanup happens regardless of the close error.
 func (c *contextCloser) Close() error {
 	defer c.cancel()
 	return c.ReadCloser.Close()

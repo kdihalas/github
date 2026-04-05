@@ -10,8 +10,10 @@ import (
 	"os"
 )
 
-// File represents a file in the GitHub repository. It contains a reference
-// to the Fs it belongs to and the name of the file.
+// File implements afero.File and represents a file or directory in the GitHub repository.
+// For regular files, it maintains separate read (bytes.Reader) and write (bytes.Buffer) state
+// to support efficient operations while avoiding GitHub's blob-replacement semantics.
+// For directories, it holds preloaded entries and an iteration offset.
 type File struct {
 	fs   *Fs // Reference to the file system this file belongs to.
 	path string
@@ -35,7 +37,8 @@ type File struct {
 	closed bool
 }
 
-// NewFile creates a new File instance with the provided Fs and file name.
+// NewFile creates a new File instance with the provided Fs, path, and name.
+// The file is not opened for reading or writing until Read or Write is called.
 func NewFile(fs *Fs, path, name string) *File {
 	return &File{
 		fs:   fs,
@@ -44,11 +47,14 @@ func NewFile(fs *Fs, path, name string) *File {
 	}
 }
 
-// Name returns the name of the file.
+// Name returns the base name of the file.
 func (f *File) Name() string { return f.name }
 
-// Readdir reads the contents of the directory and returns a slice of os.FileInfo for the entries. It maintains an internal
-// offset to allow for multiple calls to Readdir, returning subsequent entries until the end of the directory is reached.
+// Readdir reads the next count directory entries and returns them as a slice of os.FileInfo.
+// It maintains an internal offset to support multiple calls.
+// If count <= 0, it returns all remaining entries.
+// Returns io.EOF when all entries have been read.
+// Returns an error if the file is not a directory or is closed.
 func (f *File) Readdir(count int) ([]os.FileInfo, error) {
 	if f.closed {
 		return nil, os.ErrClosed
@@ -77,7 +83,8 @@ func (f *File) Readdir(count int) ([]os.FileInfo, error) {
 	return entries, nil
 }
 
-// ReaddirAll returns all the directory entries. It resets the internal offset to allow for subsequent calls to return the full listing again.
+// ReaddirAll returns all directory entries and resets the internal offset for subsequent reads.
+// Returns an error if the file is not a directory or is closed.
 func (f *File) ReaddirAll() ([]os.FileInfo, error) {
 	if f.closed {
 		return nil, os.ErrClosed
@@ -95,7 +102,8 @@ func (f *File) ReaddirAll() ([]os.FileInfo, error) {
 	return f.Readdir(-1)
 }
 
-// Readdirnames returns a slice of the names of the directory entries. It uses Readdir to get the entries and extracts their names.
+// Readdirnames returns a slice of the names of the next count directory entries.
+// Returns an error if the file is not a directory or is closed.
 func (f *File) Readdirnames(count int) ([]string, error) {
 	infos, err := f.Readdir(count)
 	if err != nil {
@@ -108,7 +116,9 @@ func (f *File) Readdirnames(count int) ([]string, error) {
 	return names, nil
 }
 
-// Stat returns the FileInfo structure describing the file. It returns an error if the file is closed.
+// Stat returns a FileInfo describing the file.
+// It returns the current size from either the reader (if readable) or buffer (if writable).
+// Returns an error if the file is closed.
 func (f *File) Stat() (os.FileInfo, error) {
 	if f.closed {
 		return nil, os.ErrClosed
@@ -120,7 +130,8 @@ func (f *File) Stat() (os.FileInfo, error) {
 	}, nil
 }
 
-// Sync flushes the file's content to GitHub if it has been modified (dirty). It returns an error if the file is closed or if the flush operation fails.
+// Sync flushes any pending writes to GitHub and clears the dirty flag.
+// Returns an error if the file is closed or the flush operation fails.
 func (f *File) Sync() error {
 	if f.closed {
 		return os.ErrClosed
@@ -131,8 +142,10 @@ func (f *File) Sync() error {
 	return nil
 }
 
-// Truncate changes the size of the file to the specified size. If the file is extended, the new bytes are zero-filled.
-// It marks the file as dirty if it was modified. It returns an error if the file is closed or if the file is not writable.
+// Truncate changes the file size to the given size.
+// If size is greater than the current size, the file is extended with zero bytes.
+// If size is less than the current size, the file is truncated.
+// Returns an error if the file is closed or not writable.
 func (f *File) Truncate(size int64) error {
 	if f.closed {
 		return os.ErrClosed
@@ -153,13 +166,14 @@ func (f *File) Truncate(size int64) error {
 	return nil
 }
 
-// WriteString writes the string s to the file. It returns the number of bytes written and any error encountered.
-// It marks the file as dirty if it was modified. It returns an error if the file is closed, is a directory, or is not writable.
+// WriteString writes the string s to the file and returns the number of bytes written.
+// It marks the file as dirty. Returns an error if the file is closed, is a directory, or not writable.
 func (f *File) WriteString(s string) (n int, err error) {
 	return f.Write([]byte(s))
 }
 
-// Close closes the file, flushing any dirty content to GitHub if necessary. It returns an error if the file is already closed or if the flush operation fails.
+// Close closes the file. If the file has been modified (dirty), it flushes the changes to GitHub first.
+// Returns an error if the file is already closed or if the flush operation fails.
 func (f *File) Close() error {
 	if f.closed {
 		return os.ErrClosed
@@ -174,8 +188,9 @@ func (f *File) Close() error {
 	return nil
 }
 
-// Read implements the io.Reader interface for the File. It reads data from the file's reader and returns the number of bytes read and any error encountered.
-// It returns an error if the file is closed, is a directory, or is not readable.
+// Read reads up to len(p) bytes from the file and stores them in p.
+// It returns the number of bytes read and any error encountered.
+// Returns an error if the file is closed, is a directory, or not readable.
 func (f *File) Read(p []byte) (n int, err error) {
 	if f.closed {
 		return 0, os.ErrClosed
@@ -191,7 +206,9 @@ func (f *File) Read(p []byte) (n int, err error) {
 	return r.Read(p)
 }
 
-// ReadAt implements the io.ReaderAt interface for the File. It reads data from the file's reader at the specified offset and returns the number of bytes read and any error encountered.
+// ReadAt reads up to len(p) bytes from the file starting at byte offset off
+// and stores them in p. It returns the number of bytes read and any error encountered.
+// Returns an error if the file is closed or not readable.
 func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
 	if f.closed {
 		return 0, os.ErrClosed
@@ -204,9 +221,10 @@ func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
 	return r.ReadAt(p, off)
 }
 
-// Seek implements the io.Seeker interface for the File. It changes the read/write position in the file based on the offset and
-// whence parameters. It returns the new position and any error encountered. It returns an error if the file is closed, is a directory,
-// or if the whence parameter is invalid.
+// Seek changes the read position to the specified offset relative to whence
+// (io.SeekStart, io.SeekCurrent, or io.SeekEnd).
+// It returns the new absolute offset and any error encountered.
+// Returns an error if the file is closed, is a directory, or whence is invalid.
 func (f *File) Seek(offset int64, whence int) (int64, error) {
 	if f.closed {
 		return 0, os.ErrClosed
@@ -239,8 +257,8 @@ func (f *File) Seek(offset int64, whence int) (int64, error) {
 	return f.getReader().Seek(offset, whence)
 }
 
-// Write implements the io.Writer interface for the File. It writes data to the file's buffer and returns the number of bytes written and any error encountered.
-// It marks the file as dirty if it was modified. It returns an error if the file is closed, is a directory, or is not writable.
+// Write writes len(p) bytes from p to the file and returns the number of bytes written.
+// It marks the file as dirty. Returns an error if the file is closed, is a directory, or not writable.
 func (f *File) Write(p []byte) (int, error) {
 	if f.closed {
 		return 0, os.ErrClosed
@@ -259,8 +277,9 @@ func (f *File) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// WriteAt implements the io.WriterAt interface for the File. It writes data to the file's buffer at the specified offset and returns the number of bytes written and any error encountered.
-// It marks the file as dirty if it was modified. It returns an error if the file is closed, is a directory, or is not writable.
+// WriteAt writes len(p) bytes from p to the file starting at byte offset off.
+// It expands the buffer if necessary and returns the number of bytes written.
+// It marks the file as dirty. Returns an error if the file is closed or not writable.
 func (f *File) WriteAt(p []byte, off int64) (int, error) {
 	if f.closed {
 		return 0, os.ErrClosed
@@ -285,8 +304,11 @@ func (f *File) WriteAt(p []byte, off int64) (int, error) {
 	return len(p), nil
 }
 
-// RangeReader returns an io.ReadCloser that reads a specific byte range from the file. It uses HTTP Range requests against the raw content endpoint to efficiently fetch only the requested portion of the file.
-// It returns an error if the file is closed, is a directory, is not readable, or if the range parameters are invalid.
+// RangeReader returns an io.ReadCloser for reading a specific byte range from the file.
+// It first tries to serve the range from the in-memory reader if available and sufficient.
+// Otherwise, it issues an HTTP Range request to raw.githubusercontent.com for efficient partial downloads.
+// The returned reader's context is cancelled when the reader is closed.
+// Returns an error if the file is closed, is a directory, not readable, or range parameters are invalid.
 func (f *File) RangeReader(offset, length int64) (io.ReadCloser, error) {
 	if f.closed {
 		return nil, os.ErrClosed
