@@ -53,5 +53,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: coverage
+          name: coverage-report-${{ matrix.go-version }}
           path: coverage.out
