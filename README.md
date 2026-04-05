@@ -11,7 +11,6 @@ A Go `afero.Fs` backed by a GitHub repository. Read, write, delete, and rename f
 - **Cached reads**: TTL-based in-memory caching (default 30s) reduces redundant API calls
 - **Deferred writes**: All modifications are buffered; a single GitHub API call per `Close()` means one commit per file flush
 - **Partial reads via RangeReader**: Fetch byte ranges efficiently using HTTP Range requests against raw.githubusercontent.com without downloading the entire file
-- **WalkDir helper**: Tree traversal with `fs.SkipDir` / `fs.SkipAll` support mimics standard `fs.WalkDir` semantics
 
 ## Installation
 
@@ -222,6 +221,6 @@ Errors are wrapped in `*os.PathError` at method boundaries for standard Go error
 
 ## License
 
-Copyright (c) 2026 Kostas Dihalas
+Copyright (c) 2026 Konstantinos Dichalas
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
