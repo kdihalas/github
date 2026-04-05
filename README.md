@@ -1,6 +1,6 @@
 # Github Backend for Afero
 
-[![Build](https://github.com/kdihalas/github/actions/workflows/build.yml/badge.svg?event=push)](https://github.com/kdihalas/github/actions/workflows/build.yml) [![codecov](https://codecov.io/github/kdihalas/github/graph/badge.svg?token=F9NZRU7GNO)](https://codecov.io/github/kdihalas/github)
+[![Build](https://github.com/kdihalas/github/actions/workflows/build.yml/badge.svg?event=push)](https://github.com/kdihalas/github/actions/workflows/build.yml) [![codecov](https://codecov.io/github/kdihalas/github/graph/badge.svg?token=F9NZRU7GNO)](https://codecov.io/github/kdihalas/github) [![Go Report Card](https://goreportcard.com/badge/github.com/kdihalas/github)](https://goreportcard.com/report/github.com/kdihalas/github)
 
 A Go `afero.Fs` backed by a GitHub repository. Read, write, delete, and rename files in a repo using standard Go file-IO semantics; under the hood it calls the GitHub Contents API and raw.githubusercontent.com for byte ranges.
 
